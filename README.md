@@ -146,5 +146,3 @@ Contributions, issues, and feature requests are welcome! Feel free to check the 
 ## 📄 License
 
 MIT License
-
-Copyright (c) 2023 Vue Gantt Chart
