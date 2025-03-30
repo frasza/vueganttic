@@ -19,6 +19,8 @@ A lightweight, interactive Gantt chart component for Vue 3 applications. Easily 
 - **TypeScript Support**: Fully typed component API
 - **Event Handling**: Emits events for item selection, movement, and resizing
 
+![VueGanttic Usage Showcase](https://i.imgur.com/yu3iVWk.gif)
+
 ## 📦 Installation
 
 ```bash
