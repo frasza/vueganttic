@@ -13,6 +13,7 @@ A lightweight, interactive Gantt chart component for Vue 3 applications. Easily 
 - **Date-Based Positioning**: Accurate item placement based on date ranges
 - **Custom Styling**: Clean, minimal design that's easy to customize
 - **TypeScript Support**: Fully typed component API
+- **Event Handling**: Emits events for item selection, movement, and resizing
 
 ## 📦 Installation
 
@@ -24,39 +25,52 @@ npm install vue-gantt-chart
 
 ```vue
 <script setup lang="ts">
-import { ref } from "vue";
-import Gantt from "vue-gantt-chart";
-import type { Item } from "vue-gantt-chart";
+import { ref } from 'vue'
+import Gantt from 'vue-gantt-chart'
+import type { Item, ViewMode } from 'vue-gantt-chart'
 
 // Define your items with start and end dates
 const items = ref<Item[]>([
   {
-    id: "task1",
-    title: "Project Planning",
+    id: 'task1',
+    title: 'Project Planning',
     startDate: new Date(2023, 0, 1), // Jan 1, 2023
     endDate: new Date(2023, 1, 15), // Feb 15, 2023
   },
   {
-    id: "task2",
-    title: "Development Phase",
+    id: 'task2',
+    title: 'Development Phase',
     startDate: new Date(2023, 1, 16), // Feb 16, 2023
     endDate: new Date(2023, 3, 30), // Apr 30, 2023
   },
-]);
+])
 
-// Handle item updates
+// Current view mode (months, weeks, or days)
+const view = ref<ViewMode>('months')
+// Current year to display
+const year = ref<number>(2023)
+
+// Handle item updates (simple example)
 function handleItemUpdate(updatedItem: Item) {
-  const index = items.value.findIndex((item) => item.id === updatedItem.id);
+  const index = items.value.findIndex((item) => item.id === updatedItem.id)
   if (index !== -1) {
-    items.value[index] = updatedItem;
+    items.value[index] = updatedItem
   }
 }
 </script>
 
 <template>
-  <div class="p-4">
-    <h1 class="text-xl font-bold mb-4">Project Timeline</h1>
-    <Gantt :items="items" @update:item="handleItemUpdate" />
+  <div>
+    <Gantt
+      :items="items"
+      :year="year"
+      :view="view"
+      @update:item="handleItemUpdate"
+      @update:year="year = $event"
+      @update:view="view = $event"
+      @select="(item) => console.log('Selected:', item)"
+      @move="(item) => console.log('Moved:', item)"
+      @resize="(item) => console.log('Resized:', item)" />
   </div>
 </template>
 ```
@@ -65,26 +79,35 @@ function handleItemUpdate(updatedItem: Item) {
 
 ### Props
 
-| Prop  | Type     | Required | Description                                  |
-| ----- | -------- | -------- | -------------------------------------------- |
-| items | `Item[]` | Yes      | Array of items to display in the Gantt chart |
+| Prop  | Type       | Required | Description                                  |
+| ----- | ---------- | -------- | -------------------------------------------- |
+| items | `Item[]`   | Yes      | Array of items to display in the Gantt chart |
+| year  | `number`   | Yes      | Year to display in the timeline              |
+| view  | `ViewMode` | Yes      | Current view mode (months, weeks, or days)   |
 
 ### Item Interface
 
 ```typescript
 interface Item {
-  id?: string; // Optional unique identifier
-  title: string; // Item title/label
-  startDate: Date; // Start date of the item
-  endDate: Date; // End date of the item
+  id?: string // Optional unique identifier
+  title: string // Item title/label
+  startDate: Date // Start date of the item
+  endDate: Date // End date of the item
 }
+
+type ViewMode = 'months' | 'weeks' | 'days'
 ```
 
 ### Events
 
-| Event       | Payload | Description                              |
-| ----------- | ------- | ---------------------------------------- |
-| update:item | `Item`  | Emitted when an item is resized or moved |
+| Event       | Payload    | Description                        |
+| ----------- | ---------- | ---------------------------------- |
+| update:item | `Item`     | Emitted when an item is updated    |
+| update:year | `number`   | Emitted when the year changes      |
+| update:view | `ViewMode` | Emitted when the view mode changes |
+| select      | `Item`     | Emitted when an item is selected   |
+| move        | `Item`     | Emitted when an item is moved      |
+| resize      | `Item`     | Emitted when an item is resized    |
 
 ## 🔍 Features in Detail
 
