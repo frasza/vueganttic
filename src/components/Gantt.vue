@@ -12,7 +12,7 @@ export interface Item {
 interface ComputedItem extends Item {
   start: number;
   width: number;
-  durationMonths: number;
+  durationDays: number;
   left: string;
   style: {
     left: string;
@@ -21,7 +21,6 @@ interface ComputedItem extends Item {
 }
 
 type ResizeType = "start" | "end" | "move" | null;
-type ViewMode = "months" | "weeks" | "days";
 
 // Props and emits
 const props = defineProps<{
@@ -36,21 +35,48 @@ const emit = defineEmits<{
 const containerRef = ref<HTMLElement | null>(null);
 const containerWidth = ref(0);
 const selectedYear = ref(new Date().getFullYear());
-const viewMode = ref<ViewMode>("months");
+const viewMode = ref<"months" | "weeks" | "days">("months");
+
+// Tooltip state
+const showTooltip = ref(false);
+const tooltipContent = ref("");
+const tooltipStyle = ref({
+  left: "0px",
+  top: "0px",
+});
+
+// Day width based on zoom level - the core calculation unit
+const dayWidth = computed(() => {
+  if (viewMode.value === "months") {
+    return containerWidth.value / (12 * 30);
+  } else if (viewMode.value === "weeks") {
+    return containerWidth.value / (10 * 7);
+  } else {
+    return containerWidth.value / 30;
+  }
+});
 
 // Drag state
 const isDragging = ref(false);
 const dragType = ref<ResizeType>(null);
 const activeItemIndex = ref<number | null>(null);
 const initialMouseX = ref(0);
-const initialItemStart = ref(0);
 const initialItemWidth = ref(0);
 const initialItemStartPx = ref(0);
+
+// Active item style
+const activeItemStyle = ref({
+  left: "0px",
+  width: "0px",
+});
+
+// Track the actual day positions for exact snapping
+const currentStartDay = ref(0);
+const currentDurationDays = ref(0);
 
 // Date calculations
 const availableYears = computed(() => {
   const years = new Set<number>();
-  // Add current year
   years.add(new Date().getFullYear());
 
   props.items.forEach((item) => {
@@ -63,103 +89,54 @@ const availableYears = computed(() => {
 
 const filteredItems = computed(() => {
   return props.items.filter((item) => {
-    // Include if item spans or is within the selected year
     const startYear = item.startDate.getFullYear();
     const endYear = item.endDate.getFullYear();
     return startYear <= selectedYear.value && endYear >= selectedYear.value;
   });
 });
 
-const earliestDate = computed(() => {
-  // Start with the first day of selected year as default
-  let earliest = new Date(selectedYear.value, 0, 1);
-
-  filteredItems.value.forEach((item) => {
-    // If item starts before selected year, use Jan 1 of selected year
-    if (item.startDate.getFullYear() < selectedYear.value) {
-      const adjustedDate = new Date(selectedYear.value, 0, 1);
-      if (adjustedDate < earliest) earliest = adjustedDate;
-    }
-    // If item starts in selected year, use actual start date
-    else if (item.startDate.getFullYear() === selectedYear.value) {
-      if (item.startDate < earliest) earliest = new Date(item.startDate);
-    }
-  });
-
-  // Format earliest date based on view mode
-  if (viewMode.value === "months") {
-    earliest.setDate(1); // First day of the month
-  } else if (viewMode.value === "weeks") {
-    // Set to the beginning of the week
-    const day = earliest.getDay();
-    earliest.setDate(earliest.getDate() - day);
-  }
-  return earliest;
+// Calculate days in the selected year
+const daysInYear = computed(() => {
+  const startOfYear = new Date(selectedYear.value, 0, 1);
+  const endOfYear = new Date(selectedYear.value, 11, 31, 23, 59, 59);
+  return (
+    Math.ceil(
+      (endOfYear.getTime() - startOfYear.getTime()) / (24 * 60 * 60 * 1000),
+    ) + 1
+  );
 });
 
+// Total time units to display
 const totalTimeUnits = computed(() => {
-  if (viewMode.value === "months") {
-    return 12; // Always show 12 months for consistent display
-  } else if (viewMode.value === "weeks") {
-    // Calculate weeks in the year (approximately 52)
-    const startOfYear = new Date(selectedYear.value, 0, 1);
-    const endOfYear = new Date(selectedYear.value, 11, 31, 23, 59, 59);
-    return (
-      Math.ceil(
-        (endOfYear.getTime() - startOfYear.getTime()) /
-          (7 * 24 * 60 * 60 * 1000),
-      ) + 1
-    );
-  } else {
-    // days
-    // Calculate days in the year
-    const startOfYear = new Date(selectedYear.value, 0, 1);
-    const endOfYear = new Date(selectedYear.value, 11, 31, 23, 59, 59);
-    return (
-      Math.ceil(
-        (endOfYear.getTime() - startOfYear.getTime()) / (24 * 60 * 60 * 1000),
-      ) + 1
-    );
-  }
+  if (viewMode.value === "months") return 12;
+  if (viewMode.value === "weeks") return Math.ceil(daysInYear.value / 7);
+  return daysInYear.value;
 });
 
-// Size calculations
-const timeUnitWidth = computed(() => {
-  if (containerWidth.value === 0 || totalTimeUnits.value === 0) {
-    // Default fallback widths based on view mode
-    if (viewMode.value === "months") return 112;
-    if (viewMode.value === "weeks") return 50;
-    return 24; // days
-  }
+// Calculate the width of the timeline
+const timelineWidth = computed(() => {
+  if (viewMode.value === "months") return containerWidth.value;
 
-  if (viewMode.value === "months") {
-    // Always show all 12 months at full width
-    return containerWidth.value / 12;
-  } else if (viewMode.value === "weeks") {
-    // Fixed width to show 10 weeks before scrolling
-    return containerWidth.value / 10;
-  } else {
-    // Fixed width to show approximately 30 days (1 month) before scrolling
-    return containerWidth.value / 30;
-  }
+  const calculatedWidth = dayWidth.value * daysInYear.value;
+  return Math.max(containerWidth.value, calculatedWidth);
 });
 
 const computedObjectives = computed(() => {
-  return filteredItems.value.map((item) => {
-    return computeDateBasedPosition(item);
-  });
+  return filteredItems.value.map(computeDateBasedPosition);
 });
 
 function computeDateBasedPosition(item: Item): ComputedItem {
-  // Create reference to start of the selected year (January 1st)
   const yearStart = new Date(selectedYear.value, 0, 1);
   const yearEnd = new Date(selectedYear.value, 11, 31, 23, 59, 59);
 
   // Clamp dates to year boundaries
   const effectiveStartDate =
     item.startDate < yearStart ? yearStart : new Date(item.startDate);
+  effectiveStartDate.setHours(0, 0, 0, 0);
+
   const effectiveEndDate =
     item.endDate > yearEnd ? yearEnd : new Date(item.endDate);
+  effectiveEndDate.setHours(23, 59, 59, 999);
 
   // Calculate absolute days from year start for positioning
   const daysFromYearStartToItemStart = Math.max(
@@ -179,40 +156,24 @@ function computeDateBasedPosition(item: Item): ComputedItem {
     daysFromYearStartToItemEnd - daysFromYearStartToItemStart + 1,
   );
 
-  let startUnit, width;
+  let left, width;
 
   if (viewMode.value === "months") {
-    // Position at the appropriate month
-    startUnit = Math.floor((daysFromYearStartToItemStart * 12) / 365);
+    left = getExactPositionForDay(daysFromYearStartToItemStart);
 
-    // Width based on day count relative to entire year (365 days / 12 months)
-    // This ensures a month-long item keeps roughly the same proportion in all views
-    const monthWidth = timeUnitWidth.value;
-    width = (durationInDays / 30.5) * monthWidth; // 30.5 is avg days per month
-  } else if (viewMode.value === "weeks") {
-    // Position at the appropriate week
-    startUnit = Math.floor(daysFromYearStartToItemStart / 7);
-
-    // Width based on actual days, converted to weeks
-    const weekWidth = timeUnitWidth.value;
-    width = (durationInDays / 7) * weekWidth;
+    // Use the exact end day position without the extra dayWidth adjustment
+    const endPosition = getExactPositionForDay(daysFromYearStartToItemEnd);
+    width = Math.max(4, endPosition - left);
   } else {
-    // days
-    // Direct day position
-    startUnit = daysFromYearStartToItemStart;
-
-    // Width based on actual days
-    width = durationInDays * timeUnitWidth.value;
+    left = daysFromYearStartToItemStart * dayWidth.value;
+    width = durationInDays * dayWidth.value;
   }
-
-  // Calculate left position
-  const left = startUnit * timeUnitWidth.value;
 
   return {
     ...item,
-    start: startUnit,
+    start: daysFromYearStartToItemStart,
     width,
-    durationMonths: durationInDays, // Store the actual day count for reference
+    durationDays: durationInDays,
     left: `${left}px`,
     style: {
       left: `${left}px`,
@@ -221,20 +182,68 @@ function computeDateBasedPosition(item: Item): ComputedItem {
   };
 }
 
+// Helper function to get precise position for a day in month view
+function getExactPositionForDay(dayOfYear: number): number {
+  if (viewMode.value !== "months") {
+    return dayOfYear * dayWidth.value;
+  }
+
+  const yearStart = new Date(selectedYear.value, 0, 1);
+  const date = new Date(yearStart);
+  date.setDate(yearStart.getDate() + dayOfYear);
+
+  // Calculate position based on month and day
+  const month = date.getMonth();
+  const day = date.getDate() - 1; // 0-based day within month
+
+  // Calculate the width of each month (proportional to days in month)
+  let position = 0;
+  for (let i = 0; i < month; i++) {
+    const lastDay = new Date(selectedYear.value, i + 1, 0).getDate();
+    position += (lastDay / daysInYear.value) * containerWidth.value;
+  }
+
+  // Add position within current month
+  const lastDayInMonth = new Date(selectedYear.value, month + 1, 0).getDate();
+  position +=
+    (day / lastDayInMonth) *
+    ((lastDayInMonth / daysInYear.value) * containerWidth.value);
+
+  return position;
+}
+
+// Time labels computed property
 const timeLabels = computed(() => {
   const labels = [];
+  const yearStart = new Date(selectedYear.value, 0, 1);
 
   if (viewMode.value === "months") {
-    // Show all 12 months of the year
+    // Calculate month widths based on actual days in each month
+    let totalDaysInYear = daysInYear.value;
+
     for (let i = 0; i < 12; i++) {
-      const date = new Date(selectedYear.value, i, 15);
-      labels.push(
-        date.toLocaleString("default", { month: "short", year: "2-digit" }),
+      const date = new Date(selectedYear.value, i, 1);
+      const lastDay = new Date(selectedYear.value, i + 1, 0).getDate();
+      const monthWidth = Math.round(
+        (lastDay / totalDaysInYear) * containerWidth.value,
       );
+
+      labels.push({
+        text: date.toLocaleString("default", {
+          month: "short",
+          year: "2-digit",
+        }),
+        width: monthWidth,
+      });
+    }
+
+    // Ensure the total width matches container exactly
+    let totalWidth = labels.reduce((sum, label) => sum + label.width, 0);
+    if (totalWidth !== containerWidth.value) {
+      labels[11].width += containerWidth.value - totalWidth;
     }
   } else if (viewMode.value === "weeks") {
-    // Start from beginning of year
-    const startDate = new Date(selectedYear.value, 0, 1);
+    const startDate = new Date(yearStart);
     // Set to the first day of the week
     const day = startDate.getDay();
     startDate.setDate(startDate.getDate() - day);
@@ -249,20 +258,25 @@ const timeLabels = computed(() => {
           new Date(date.getFullYear(), date.getMonth(), 1).getDay()) /
           7,
       );
-      labels.push(
-        `W${weekNum} (${date.toLocaleString("default", { month: "short" })})`,
-      );
+      labels.push({
+        text: `W${weekNum} (${date.toLocaleString("default", {
+          month: "short",
+        })})`,
+        width: 7 * dayWidth.value,
+      });
     }
   } else {
-    // days
-    // Start from beginning of year
-    const startDate = new Date(selectedYear.value, 0, 1);
-    for (let i = 0; i < totalTimeUnits.value; i++) {
-      const date = new Date(startDate);
-      date.setDate(startDate.getDate() + i);
-      labels.push(
-        date.toLocaleString("default", { day: "numeric", month: "short" }),
-      );
+    // Daily labels
+    for (let i = 0; i < daysInYear.value; i++) {
+      const date = new Date(yearStart);
+      date.setDate(yearStart.getDate() + i);
+      labels.push({
+        text: date.toLocaleString("default", {
+          day: "numeric",
+          month: "short",
+        }),
+        width: dayWidth.value,
+      });
     }
   }
 
@@ -310,11 +324,22 @@ function startResize(event: MouseEvent, type: ResizeType, index: number) {
   initialMouseX.value = event.clientX;
 
   const item = computedObjectives.value[index];
-  initialItemStart.value = parseFloat(item.style.left) / timeUnitWidth.value;
-  initialItemWidth.value = parseFloat(item.style.width);
-  initialItemStartPx.value = parseFloat(item.style.left);
+  const leftPx = parseFloat(item.style.left);
+  const widthPx = parseFloat(item.style.width);
 
-  // Add 'user-select: none' to prevent text selection during drag
+  initialItemWidth.value = widthPx;
+  initialItemStartPx.value = leftPx;
+
+  // Set initial values for tracking
+  currentStartDay.value = Math.floor(leftPx / dayWidth.value);
+  currentDurationDays.value = Math.ceil(widthPx / dayWidth.value);
+
+  // Set initial active item style
+  activeItemStyle.value = {
+    left: `${leftPx}px`,
+    width: `${widthPx}px`,
+  };
+
   document.body.style.userSelect = "none";
 }
 
@@ -330,251 +355,241 @@ function onMouseMove(event: MouseEvent) {
   } else if (dragType.value === "move") {
     handleMove(deltaX);
   }
+
+  updateTooltipPosition(event);
 }
 
 function handleEndResize(deltaX: number) {
+  if (activeItemIndex.value === null) return;
+  const item = computedObjectives.value[activeItemIndex.value];
+
   // Calculate the raw changed width in pixels
   const rawNewWidthPx = Math.max(
-    timeUnitWidth.value / 2,
+    dayWidth.value,
     initialItemWidth.value + deltaX,
   );
-  const startPx = initialItemStart.value * timeUnitWidth.value;
 
-  let snappedWidthPx;
+  // Get the start position in days
+  const startDayPosition = item.start;
 
-  // Apply different snapping logic based on view mode
+  // Calculate width in days - ceil for consistent full-day snapping
+  const widthInDays = rawNewWidthPx / dayWidth.value;
+  const roundedDays = Math.ceil(widthInDays);
+
+  // Calculate the new end day
+  const endDayPosition = startDayPosition + roundedDays - 1;
+
+  // Store exact day positions
+  currentStartDay.value = startDayPosition;
+  currentDurationDays.value = roundedDays;
+
   if (viewMode.value === "months") {
-    // For months, snap to whole months exactly
-    const widthInMonths = rawNewWidthPx / timeUnitWidth.value;
-    // Round to nearest month
-    const roundedMonths = Math.ceil(widthInMonths);
-    snappedWidthPx = roundedMonths * timeUnitWidth.value;
-  } else if (viewMode.value === "weeks") {
-    // For weeks, snap to whole weeks exactly
-    const widthInWeeks = rawNewWidthPx / timeUnitWidth.value;
-    // Round to nearest week
-    const roundedWeeks = Math.ceil(widthInWeeks);
-    snappedWidthPx = roundedWeeks * timeUnitWidth.value;
+    const startPx = getExactPositionForDay(startDayPosition);
+    const endPx = getExactPositionForDay(endDayPosition);
+    // Remove the additional dayWidth adjustment to match computeDateBasedPosition
+    const newWidth = Math.max(4, endPx - startPx);
+    updateItemStyle(startPx, newWidth);
   } else {
-    // For days, use the delta-based approach that works well
-    const initialWidthInUnits = initialItemWidth.value / timeUnitWidth.value;
-    const intendedWidthInUnits = rawNewWidthPx / timeUnitWidth.value;
-    const deltaUnits = intendedWidthInUnits - initialWidthInUnits;
-    const roundedDeltaUnits = Math.round(deltaUnits);
-    const snappedWidthInUnits = initialWidthInUnits + roundedDeltaUnits;
-    snappedWidthPx = snappedWidthInUnits * timeUnitWidth.value;
+    const startPx = startDayPosition * dayWidth.value;
+    const widthPx = roundedDays * dayWidth.value;
+    updateItemStyle(startPx, widthPx);
   }
 
-  // Ensure minimum width
-  snappedWidthPx = Math.max(timeUnitWidth.value, snappedWidthPx);
+  // Create end date with same method as updateDateBasedItem
+  const yearStart = getYearStart(selectedYear.value);
+  const exactEndDate = createDateAtDay(yearStart, endDayPosition, true);
 
-  updateItemStyle(startPx, snappedWidthPx);
+  tooltipContent.value = `End: ${exactEndDate.toLocaleDateString(undefined, {
+    weekday: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  })}`;
+  showTooltip.value = true;
 }
 
 function handleStartResize(deltaX: number) {
+  if (activeItemIndex.value === null) return;
+  const item = computedObjectives.value[activeItemIndex.value];
+
   // Calculate the raw changed start position in pixels
   const rawNewStartPx = Math.max(0, initialItemStartPx.value + deltaX);
 
-  let snappedStartPx;
-
-  // Apply different snapping logic based on view mode
+  // Calculate position in days
+  let newStartDay;
   if (viewMode.value === "months") {
-    // For months, snap to the start of months exactly
-    const startInMonths = rawNewStartPx / timeUnitWidth.value;
-    // Floor to snap to the beginning of the month
-    const flooredMonths = Math.floor(startInMonths);
-    snappedStartPx = flooredMonths * timeUnitWidth.value;
-  } else if (viewMode.value === "weeks") {
-    // For weeks, snap to the start of weeks exactly
-    const startInWeeks = rawNewStartPx / timeUnitWidth.value;
-    // Floor to snap to the beginning of the week
-    const flooredWeeks = Math.floor(startInWeeks);
-    snappedStartPx = flooredWeeks * timeUnitWidth.value;
+    newStartDay = findClosestDayForPosition(rawNewStartPx);
   } else {
-    // For days, use the delta-based approach
-    const initialStartInUnits = initialItemStartPx.value / timeUnitWidth.value;
-    const intendedStartInUnits = rawNewStartPx / timeUnitWidth.value;
-    const deltaUnits = intendedStartInUnits - initialStartInUnits;
-    const roundedDeltaUnits = Math.round(deltaUnits);
-    const snappedStartInUnits = initialStartInUnits + roundedDeltaUnits;
-    snappedStartPx = snappedStartInUnits * timeUnitWidth.value;
+    newStartDay = Math.floor(rawNewStartPx / dayWidth.value);
   }
 
-  // Adjust width proportionally
-  const snappedWidthPx = Math.max(
-    timeUnitWidth.value,
-    initialItemWidth.value - (snappedStartPx - initialItemStartPx.value),
-  );
+  // Get the end day (keep the original end date)
+  const endDay = item.start + item.durationDays - 1;
 
-  updateItemStyle(snappedStartPx, snappedWidthPx);
+  // Calculate new duration
+  const newDuration = Math.max(1, endDay - newStartDay + 1);
+
+  // Store exact day positions
+  currentStartDay.value = newStartDay;
+  currentDurationDays.value = newDuration;
+
+  if (viewMode.value === "months") {
+    const startPx = getExactPositionForDay(newStartDay);
+    const endPx = getExactPositionForDay(endDay);
+    // Remove the additional dayWidth adjustment
+    const newWidth = Math.max(4, endPx - startPx);
+    updateItemStyle(startPx, newWidth);
+  } else {
+    const startPx = newStartDay * dayWidth.value;
+    const widthPx = newDuration * dayWidth.value;
+    updateItemStyle(startPx, widthPx);
+  }
+
+  // Calculate exact dates
+  const yearStart = getYearStart(selectedYear.value);
+  const exactStartDate = createDateAtDay(yearStart, newStartDay);
+
+  tooltipContent.value = `Start: ${exactStartDate.toLocaleDateString(
+    undefined,
+    {
+      weekday: "short",
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    },
+  )}`;
+  showTooltip.value = true;
 }
 
 function handleMove(deltaX: number) {
+  if (activeItemIndex.value === null) return;
+  const item = computedObjectives.value[activeItemIndex.value];
+
   // Calculate raw new position
   const rawNewStartPx = Math.max(0, initialItemStartPx.value + deltaX);
 
-  let snappedStartPx;
-
-  // Apply different snapping logic based on view mode
+  // Find the closest day for the new position
+  let newStartDay;
   if (viewMode.value === "months") {
-    // For months, snap to the start of months exactly
-    const startInMonths = rawNewStartPx / timeUnitWidth.value;
-    // Round to nearest month (could be floor if you want to strictly snap to start)
-    const roundedMonths = Math.round(startInMonths);
-    snappedStartPx = roundedMonths * timeUnitWidth.value;
-  } else if (viewMode.value === "weeks") {
-    // For weeks, snap to the start of weeks exactly
-    const startInWeeks = rawNewStartPx / timeUnitWidth.value;
-    // Round to nearest week (could be floor if you want to strictly snap to start)
-    const roundedWeeks = Math.round(startInWeeks);
-    snappedStartPx = roundedWeeks * timeUnitWidth.value;
+    newStartDay = findClosestDayForPosition(rawNewStartPx);
   } else {
-    // For days, use the delta-based approach
-    const initialStartInUnits = initialItemStartPx.value / timeUnitWidth.value;
-    const intendedStartInUnits = rawNewStartPx / timeUnitWidth.value;
-    const deltaUnits = intendedStartInUnits - initialStartInUnits;
-    const roundedDeltaUnits = Math.round(deltaUnits);
-    const snappedStartInUnits = initialStartInUnits + roundedDeltaUnits;
-    snappedStartPx = snappedStartInUnits * timeUnitWidth.value;
+    newStartDay = Math.floor(rawNewStartPx / dayWidth.value);
   }
 
-  updateItemStyle(snappedStartPx, initialItemWidth.value);
+  // Calculate new end day (keeping the same duration)
+  const newEndDay = newStartDay + item.durationDays - 1;
+
+  // Store exact day positions
+  currentStartDay.value = newStartDay;
+  currentDurationDays.value = item.durationDays;
+
+  if (viewMode.value === "months") {
+    const startPx = getExactPositionForDay(newStartDay);
+    const endPx = getExactPositionForDay(newEndDay);
+    // Remove the additional dayWidth adjustment
+    const width = Math.max(4, endPx - startPx);
+    updateItemStyle(startPx, width);
+  } else {
+    const startPx = newStartDay * dayWidth.value;
+    const widthPx = item.durationDays * dayWidth.value;
+    updateItemStyle(startPx, widthPx);
+  }
+
+  // Calculate exact dates
+  const yearStart = getYearStart(selectedYear.value);
+  const startDate = createDateAtDay(yearStart, newStartDay);
+  const endDate = createDateAtDay(yearStart, newEndDay, true);
+
+  tooltipContent.value = `${startDate.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  })} - ${endDate.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  })}`;
+  showTooltip.value = true;
+}
+
+// Helper function to find the closest day for a given pixel position
+function findClosestDayForPosition(positionPx: number): number {
+  if (viewMode.value !== "months") {
+    return Math.floor(positionPx / dayWidth.value);
+  }
+
+  // Optimization: narrow down the search by month first
+  let monthStart = 0;
+  for (let month = 0; month < 12; month++) {
+    // Calculate month width
+    const lastDay = new Date(selectedYear.value, month + 1, 0).getDate();
+    const monthWidth = (lastDay / daysInYear.value) * containerWidth.value;
+    const monthEnd = monthStart + monthWidth;
+
+    // Check if position is in this month
+    if (positionPx >= monthStart && positionPx <= monthEnd) {
+      // Calculate day within month
+      const dayRatio = (positionPx - monthStart) / monthWidth;
+      const dayInMonth = Math.floor(dayRatio * lastDay);
+
+      // Get actual day of year
+      const date = new Date(selectedYear.value, month, dayInMonth + 1);
+      const yearStart = new Date(selectedYear.value, 0, 1);
+      return Math.floor(
+        (date.getTime() - yearStart.getTime()) / (24 * 60 * 60 * 1000),
+      );
+    }
+
+    monthStart = monthEnd;
+  }
+
+  return 0; // Fallback to first day of year
 }
 
 function updateItemStyle(leftPx: number, widthPx: number) {
-  if (!containerRef.value || activeItemIndex.value === null) return;
+  if (activeItemIndex.value === null) return;
 
-  const itemElement = containerRef.value.querySelectorAll(".gantt-item")[
-    activeItemIndex.value
-  ] as HTMLElement;
-  if (itemElement) {
-    itemElement.style.left = `${leftPx}px`;
-    itemElement.style.width = `${widthPx}px`;
-  }
+  // Update reactive style object
+  activeItemStyle.value = {
+    left: `${leftPx}px`,
+    width: `${widthPx}px`,
+  };
 }
 
 function updateDateBasedItem(
   item: Item,
   newStartPosition: number,
-  newDurationMonths: number,
+  newDurationDays: number,
 ) {
-  const baseDate = new Date(earliestDate.value);
-  const timeUnit = viewMode.value;
+  const yearStart = getYearStart(selectedYear.value);
 
-  // Always use whole number positions for start and duration
-  const startPositionInUnits = Math.round(newStartPosition);
-  const durationInUnits = Math.max(1, Math.round(newDurationMonths));
+  // Ensure we use the exact same position calculation as during dragging
+  const startPositionInDays = newStartPosition;
+  const durationInDays = Math.max(1, newDurationDays);
 
-  if (dragType.value === "start") {
-    // Update start date
-    const newStartDate = new Date(baseDate);
-    if (timeUnit === "months") {
-      newStartDate.setMonth(baseDate.getMonth() + startPositionInUnits);
-      // Set to first day of month for consistency
-      newStartDate.setDate(1);
-    } else if (timeUnit === "weeks") {
-      newStartDate.setDate(baseDate.getDate() + startPositionInUnits * 7);
-      // Set to first day of week
-      const dayOfWeek = newStartDate.getDay();
-      newStartDate.setDate(newStartDate.getDate() - dayOfWeek);
-    } else {
-      // days
-      newStartDate.setDate(baseDate.getDate() + startPositionInUnits);
-    }
-    item.startDate = newStartDate;
-
-    // Ensure end date is consistent with new duration
-    const newEndDate = new Date(newStartDate);
-    if (timeUnit === "months") {
-      newEndDate.setMonth(newStartDate.getMonth() + durationInUnits);
-      // Set to end of month (last day of previous month)
-      newEndDate.setDate(0);
-    } else if (timeUnit === "weeks") {
-      // Add weeks and then go to last day of the week (6 days from start of week)
-      newEndDate.setDate(newStartDate.getDate() + durationInUnits * 7 - 1);
-      // Ensure it's the last day of the week
-      const daysToAdd = 6 - newEndDate.getDay();
-      newEndDate.setDate(newEndDate.getDate() + daysToAdd);
-    } else {
-      // days
-      newEndDate.setDate(newStartDate.getDate() + durationInUnits - 1);
-    }
-    item.endDate = newEndDate;
-  } else if (dragType.value === "end") {
-    // Update end date only
-    const newEndDate = new Date(baseDate);
-    if (timeUnit === "months") {
-      newEndDate.setMonth(
-        baseDate.getMonth() + startPositionInUnits + durationInUnits,
-      );
-      // Set to end of month (last day of month)
-      newEndDate.setDate(0);
-    } else if (timeUnit === "weeks") {
-      // Set to the last day of the last week
-      newEndDate.setDate(
-        baseDate.getDate() + (startPositionInUnits + durationInUnits) * 7 - 1,
-      );
-      // Ensure it's the last day of the week
-      const daysToAdd = 6 - newEndDate.getDay();
-      newEndDate.setDate(newEndDate.getDate() + daysToAdd);
-    } else {
-      // days
-      newEndDate.setDate(
-        baseDate.getDate() + startPositionInUnits + durationInUnits - 1,
-      );
-    }
-    item.endDate = newEndDate;
-  } else if (dragType.value === "move") {
-    // Update start date
-    const newStartDate = new Date(baseDate);
-    if (timeUnit === "months") {
-      newStartDate.setMonth(baseDate.getMonth() + startPositionInUnits);
-      // Set to first day of month
-      newStartDate.setDate(1);
-    } else if (timeUnit === "weeks") {
-      newStartDate.setDate(baseDate.getDate() + startPositionInUnits * 7);
-      // Set to first day of week
-      const dayOfWeek = newStartDate.getDay();
-      newStartDate.setDate(newStartDate.getDate() - dayOfWeek);
-    } else {
-      // days
-      newStartDate.setDate(baseDate.getDate() + startPositionInUnits);
-    }
-    item.startDate = newStartDate;
-
-    // Calculate new end date based on duration
-    const newEndDate = new Date(newStartDate);
-    if (timeUnit === "months") {
-      newEndDate.setMonth(newStartDate.getMonth() + durationInUnits);
-      // Set to end of month (last day of month)
-      newEndDate.setDate(0);
-    } else if (timeUnit === "weeks") {
-      // Set to the last day of the last week
-      newEndDate.setDate(newStartDate.getDate() + durationInUnits * 7 - 1);
-      // Ensure it's the last day of the week
-      const daysToAdd = 6 - newEndDate.getDay();
-      newEndDate.setDate(newEndDate.getDate() + daysToAdd);
-    } else {
-      // days
-      newEndDate.setDate(newStartDate.getDate() + durationInUnits - 1);
-    }
-    item.endDate = newEndDate;
-  }
+  // Create precise start and end dates
+  item.startDate = createDateAtDay(yearStart, startPositionInDays);
+  item.endDate = createDateAtDay(
+    yearStart,
+    startPositionInDays + durationInDays - 1,
+    true,
+  );
 }
 
 function onMouseUp() {
   if (!isDragging.value || activeItemIndex.value === null) return;
 
+  // Hide tooltip
+  showTooltip.value = false;
+
   // Get the original item from filtered items
   const filteredItem = filteredItems.value[activeItemIndex.value];
-  const originalItemIndex = props.items.findIndex((item) => {
-    return (
+  const originalItemIndex = props.items.findIndex(
+    (item) =>
       filteredItem.title === item.title &&
       ("id" in filteredItem && "id" in item
         ? filteredItem.id === item.id
-        : true)
-    );
-  });
+        : true),
+  );
 
   if (originalItemIndex === -1) {
     resetDragState();
@@ -584,46 +599,16 @@ function onMouseUp() {
   const originalItem = props.items[originalItemIndex];
   const resizedItem = { ...originalItem };
 
-  // Get the current position and width from DOM for accuracy
-  const itemElement = containerRef.value?.querySelectorAll(".gantt-item")[
-    activeItemIndex.value
-  ] as HTMLElement | undefined;
-
-  if (!itemElement) {
-    resetDragState();
-    return;
-  }
-
-  // Calculate positions in terms of time units and snap to nearest unit
-  const currentLeftPx = parseFloat(itemElement.style.left);
-  const currentWidthPx = parseFloat(itemElement.style.width);
-
-  // Apply the exact same snapping logic based on view mode
-  let newStartPosition, newDurationMonths;
-
-  if (viewMode.value === "months" || viewMode.value === "weeks") {
-    // For months and weeks, snap directly to grid positions
-    newStartPosition = Math.round(currentLeftPx / timeUnitWidth.value);
-    newDurationMonths = Math.round(currentWidthPx / timeUnitWidth.value);
-  } else {
-    // For days, use existing calculation
-    newStartPosition = Math.round(currentLeftPx / timeUnitWidth.value);
-    newDurationMonths = Math.round(currentWidthPx / timeUnitWidth.value);
-  }
+  const newStartPosition = Math.floor(currentStartDay.value);
+  const newDurationDays = currentDurationDays.value;
 
   // Ensure we have valid numbers
-  if (isNaN(newStartPosition) || isNaN(newDurationMonths)) {
+  if (isNaN(newStartPosition) || isNaN(newDurationDays)) {
     resetDragState();
     return;
   }
 
-  // Update the item element to reflect the snapped position
-  updateItemStyle(
-    newStartPosition * timeUnitWidth.value,
-    newDurationMonths * timeUnitWidth.value,
-  );
-
-  updateDateBasedItem(resizedItem, newStartPosition, newDurationMonths);
+  updateDateBasedItem(resizedItem, newStartPosition, newDurationDays);
 
   // Emit the updated item
   emit("update:item", resizedItem);
@@ -640,6 +625,45 @@ function resetDragState() {
   dragType.value = null;
   activeItemIndex.value = null;
   document.body.style.userSelect = "";
+  showTooltip.value = false;
+}
+
+function updateTooltipPosition(event: MouseEvent) {
+  tooltipStyle.value = {
+    left: `${event.clientX + 10}px`,
+    top: `${event.clientY - 30}px`,
+  };
+}
+
+function formatDate(date: Date): string {
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+// Date utility functions
+function getYearStart(year: number): Date {
+  const date = new Date(year, 0, 1);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function createDateAtDay(
+  yearStart: Date,
+  dayOffset: number,
+  isEndDate = false,
+): Date {
+  const date = new Date(yearStart);
+  date.setDate(yearStart.getDate() + dayOffset);
+
+  if (isEndDate) {
+    date.setHours(23, 59, 59, 999); // End of day for end dates
+  } else {
+    date.setHours(0, 0, 0, 0); // Start of day for start dates
+  }
+
+  return date;
 }
 </script>
 
@@ -665,22 +689,55 @@ function resetDragState() {
       </div>
 
       <!-- View mode selector -->
-      <div class="flex items-center">
-        <label
-          for="view-mode-select"
-          class="mr-2 text-sm font-medium text-gray-700"
-          >View:</label
-        >
-        <select
-          id="view-mode-select"
-          v-model="viewMode"
-          @change="onViewModeChange"
-          class="rounded-md border border-gray-300 bg-white py-1 px-3 text-sm shadow-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-        >
-          <option value="months">Months</option>
-          <option value="weeks">Weeks</option>
-          <option value="days">Days</option>
-        </select>
+      <div class="flex items-center ml-auto">
+        <span class="mr-2 text-sm font-medium text-gray-700">View:</span>
+        <div class="border border-gray-200 rounded-md flex bg-white">
+          <button
+            type="button"
+            class="py-1 px-3 text-sm font-medium transition-colors focus:outline-none"
+            :class="
+              viewMode === 'months'
+                ? 'bg-gray-100 text-gray-900'
+                : 'text-gray-600 hover:bg-gray-50'
+            "
+            @click="
+              viewMode = 'months';
+              onViewModeChange();
+            "
+          >
+            Monthly
+          </button>
+          <button
+            type="button"
+            class="py-1 px-3 text-sm font-medium border-l border-gray-200 transition-colors focus:outline-none"
+            :class="
+              viewMode === 'weeks'
+                ? 'bg-gray-100 text-gray-900'
+                : 'text-gray-600 hover:bg-gray-50'
+            "
+            @click="
+              viewMode = 'weeks';
+              onViewModeChange();
+            "
+          >
+            Weekly
+          </button>
+          <button
+            type="button"
+            class="py-1 px-3 text-sm font-medium border-l border-gray-200 transition-colors focus:outline-none"
+            :class="
+              viewMode === 'days'
+                ? 'bg-gray-100 text-gray-900'
+                : 'text-gray-600 hover:bg-gray-50'
+            "
+            @click="
+              viewMode = 'days';
+              onViewModeChange();
+            "
+          >
+            Daily
+          </button>
+        </div>
       </div>
     </div>
 
@@ -689,19 +746,22 @@ function resetDragState() {
       <div
         class="flex h-10 border-b border-gray-200 bg-white"
         :style="{
-          width:
-            viewMode === 'months'
-              ? '100%'
-              : `${timeUnitWidth * totalTimeUnits}px`,
+          width: viewMode === 'months' ? '100%' : `${timelineWidth}px`,
         }"
       >
         <div
           v-for="(label, index) in timeLabels"
           :key="index"
-          class="flex h-full items-center justify-center border-r border-gray-200 text-sm font-medium text-gray-600 min-w-max"
-          :style="{ width: `${timeUnitWidth}px` }"
+          class="flex h-full items-center justify-center text-sm font-medium text-gray-600 min-w-max"
+          :class="[
+            index < timeLabels.length - 1 || viewMode !== 'months'
+              ? 'border-r'
+              : '',
+            'border-gray-200',
+          ]"
+          :style="{ width: `${label.width}px` }"
         >
-          {{ label }}
+          {{ label.text }}
         </div>
       </div>
 
@@ -710,10 +770,7 @@ function resetDragState() {
         class="relative mt-4"
         :style="{
           minHeight: `${computedObjectives.length * 48 + 16}px`,
-          width:
-            viewMode === 'months'
-              ? '100%'
-              : `${timeUnitWidth * totalTimeUnits}px`,
+          width: viewMode === 'months' ? '100%' : `${timelineWidth}px`,
         }"
       >
         <div
@@ -723,7 +780,9 @@ function resetDragState() {
         >
           <div
             class="absolute flex h-full items-center rounded-lg border border-sky-200 bg-sky-50 px-3 transition-all hover:bg-sky-100 gantt-item cursor-move"
-            :style="objective.style"
+            :style="
+              index === activeItemIndex ? activeItemStyle : objective.style
+            "
             @mousedown.stop="startResize($event, 'move', index)"
           >
             <!-- Left resize handle -->
@@ -736,9 +795,15 @@ function resetDragState() {
               ></div>
             </div>
 
-            <span class="truncate text-sm font-medium text-primary">
-              {{ objective.title }}
-            </span>
+            <div class="flex flex-col overflow-hidden">
+              <span class="truncate text-sm font-medium text-primary">
+                {{ objective.title }}
+              </span>
+              <span class="truncate text-xs text-gray-500">
+                {{ formatDate(objective.startDate) }} -
+                {{ formatDate(objective.endDate) }}
+              </span>
+            </div>
 
             <!-- Right resize handle -->
             <div
@@ -752,6 +817,15 @@ function resetDragState() {
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- Date tooltip -->
+    <div
+      v-if="showTooltip"
+      class="fixed z-50 px-2 py-1 bg-gray-800 text-white text-xs rounded shadow-lg pointer-events-none"
+      :style="tooltipStyle"
+    >
+      {{ tooltipContent }}
     </div>
   </div>
 </template>
