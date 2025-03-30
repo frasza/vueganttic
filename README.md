@@ -4,6 +4,10 @@
 
 A lightweight, interactive Gantt chart component for Vue 3 applications. Easily visualize and manage time-based project data with intuitive drag-and-drop functionality.
 
+## ⚠️ Early Implementation
+
+**This package is currently in early development stage.** Many features are still in progress and the API may change significantly between versions. Use in production environments at your own risk.
+
 ## ✨ Features
 
 - **Multiple View Modes**: Switch between months, weeks, or days view
