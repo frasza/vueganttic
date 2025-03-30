@@ -141,7 +141,7 @@ The year selector allows focusing on the relevant time period, especially useful
 
 ## 🤝 Contributing
 
-Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/yourusername/vue-gantt-chart/issues).
+Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/frasza/vueganttic/issues).
 
 ## 📄 License
 
