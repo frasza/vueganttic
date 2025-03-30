@@ -1,4 +1,4 @@
-# Vue Gantt Chart
+# VueGanttic
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
@@ -18,7 +18,7 @@ A lightweight, interactive Gantt chart component for Vue 3 applications. Easily 
 ## 📦 Installation
 
 ```bash
-npm install vue-gantt-chart
+npm install vueganttic
 ```
 
 ## 🚀 Usage
@@ -26,8 +26,8 @@ npm install vue-gantt-chart
 ```vue
 <script setup lang="ts">
 import { ref } from 'vue'
-import Gantt from 'vue-gantt-chart'
-import type { Item, ViewMode } from 'vue-gantt-chart'
+import Gantt from 'vueganttic'
+import type { Item, ViewMode } from 'vueganttic'
 
 // Define your items with start and end dates
 const items = ref<Item[]>([

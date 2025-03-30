@@ -1,12 +1,26 @@
 {
   "name": "vueganttic",
-  "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "description": "Vue component library for Gantt charts",
   "type": "module",
+  "main": "dist/vueganttic.umd.js",
+  "module": "dist/vueganttic.es.js",
+  "types": "dist/types/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/vueganttic.es.js",
+      "require": "./dist/vueganttic.umd.js"
+    },
+    "./style.css": "./dist/style.css"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.0.17",
@@ -19,5 +33,18 @@
     "typescript": "~5.7.2",
     "vite": "^6.2.0",
     "vue-tsc": "^2.2.4"
+  },
+  "peerDependencies": {
+    "vue": "^3.0.0"
+  },
+  "keywords": [
+    "vue",
+    "gantt",
+    "chart",
+    "component"
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
   }
 }
